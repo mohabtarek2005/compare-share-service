@@ -31,9 +31,10 @@ function singleClassTimetable(id, meeting) {
 describe('metrics', () => {
   test('free days count teaching days with no classes', () => {
     const { optionA, optionB, optionC } = getSampleTimetables();
-    assert.equal(countFreeDays(getClassMeetings(optionA)), 1);
-    assert.equal(countFreeDays(getClassMeetings(optionB)), 3);
-    assert.equal(countFreeDays(getClassMeetings(optionC)), 2);
+    // seven-day week (Sunday-Saturday)
+    assert.equal(countFreeDays(getClassMeetings(optionA)), 3);
+    assert.equal(countFreeDays(getClassMeetings(optionB)), 5);
+    assert.equal(countFreeDays(getClassMeetings(optionC)), 4);
   });
 
   test('total gaps add up waiting time between classes on each day', () => {
@@ -80,7 +81,7 @@ describe('metrics', () => {
   });
 
   test('metric functions handle an empty schedule without NaN or Infinity', () => {
-    assert.equal(countFreeDays([]), 5);
+    assert.equal(countFreeDays([]), 7);
     assert.equal(totalGapMinutes([]), 0);
     assert.equal(earliestStart([]), null);
     assert.equal(latestEnd([]), null);
@@ -94,7 +95,7 @@ describe('compareTimetables results and ranking', () => {
     assert.equal(result.ok, true);
     const a = result.results.find((r) => r.timetableId === 'tt-a');
     assert.deepEqual(a.metrics, {
-      freeDays: 1,
+      freeDays: 3,
       totalGapMinutes: 120,
       earliestStart: '09:00',
       latestEnd: '14:00'
@@ -236,7 +237,7 @@ describe('compareTimetables input validation', () => {
 
   test('rejects invalid day values', () => {
     const { optionA, optionB } = getSampleTimetables();
-    for (const badDay of ['FRI', 'sun', 'Sunday', '', undefined, 3]) {
+    for (const badDay of ['XYZ', 'FRIDAY', 'sun', 'Sunday', '', undefined, 3]) {
       optionB.sections[0].meetings[0].day = badDay;
       const result = compareTimetables([optionA, optionB], 'leastGaps');
       assert.deepEqual(errorCodes(result), ['INVALID_DAY'], `day ${badDay} should be rejected`);

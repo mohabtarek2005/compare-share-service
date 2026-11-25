@@ -49,7 +49,7 @@ function sendFetchError(res, failedReasons) {
   return sendBadUpstreamResponse(res);
 }
 
-// PROVISIONAL (see integrationAssumptions.js): every timetable must carry the
+// See integrationAssumptions.js (item 3): every timetable must carry the
 // owner's id. A missing or malformed owner is treated as a bad upstream
 // response, and a different owner as "not found", so nothing is ever used
 // without a positive ownership match.

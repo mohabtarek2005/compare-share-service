@@ -190,7 +190,7 @@ describe('POST /api/shares - create a share link', () => {
     const changes = [
       (timetable) => delete timetable.ownerId,
       (timetable) => (timetable.sections = []),
-      (timetable) => (timetable.sections[0].meetings[0].day = 'FRI')
+      (timetable) => (timetable.sections[0].meetings[0].day = 'XYZ')
     ];
     for (const change of changes) {
       const fakeService = createFakeTimetableFetch({ transform: (timetable) => (change(timetable), timetable) });
@@ -199,6 +199,15 @@ describe('POST /api/shares - create a share link', () => {
       assert.equal(res.status, 502);
       assert.equal(api.shareStore.items.size, 0);
     }
+  });
+
+  test('shares a timetable with a Saturday class and keeps it in the snapshot', async (t) => {
+    const fakeService = createFakeTimetableFetch({ transform: (timetable) => ((timetable.sections[1].meetings[0].day = 'SAT'), timetable) });
+    const api = await startApi(t, { fakeService });
+    const res = await createShare(api);
+    assert.equal(res.status, 201);
+    const stored = api.shareStore.items.get(res.body.token);
+    assert.equal(stored.snapshot.sections[1].meetings[0].day, 'SAT');
   });
 
   test('returns 503 when the Timetable Service is down', async (t) => {

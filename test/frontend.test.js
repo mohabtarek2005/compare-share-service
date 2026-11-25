@@ -199,9 +199,8 @@ describe('frontend API client', () => {
     assert.equal(typeof config.appConfig.auth.loginPageUrl, 'string');
     assert.equal(config.TOKEN_STORAGE_KEY, undefined, 'the old sessionStorage token key must be gone');
     assert.equal(config.getStoredAuthToken, undefined, 'the old sessionStorage reader must be gone');
-    assert.equal(config.appConfig.timetableListPath, null, 'Yehia list endpoint must stay unconfigured until agreed');
+    assert.equal(config.appConfig.timetableListPath, '/api/timetables', 'Yehia\'s confirmed list endpoint');
   });
-
   test('no frontend file reads or writes localStorage or sessionStorage', () => {
     for (const file of fs.readdirSync(PUBLIC_JS)) {
       const code = fs.readFileSync(path.join(PUBLIC_JS, file), 'utf8')

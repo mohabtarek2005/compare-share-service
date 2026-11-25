@@ -31,6 +31,43 @@ function buildStore() {
   return store;
 }
 
+// The fake keeps its sample timetables in this service's internal shape (easy
+// to change in tests) and answers in Yehia's REAL response format (commit
+// 01c6397), so every API test also goes through the real adapter.
+// Values the tests broke on purpose are passed through as they are.
+function toYehiaDay(day) {
+  return typeof day === 'string' && day.length > 0 ? day.charAt(0).toUpperCase() + day.slice(1).toLowerCase() : day;
+}
+
+function toYehiaSection(section) {
+  if (!section || typeof section !== 'object') return section;
+  const out = {
+    id: section.sectionId,
+    courseId: `course-${section.courseCode}`,
+    courseCode: section.courseCode,
+    courseTitle: section.courseCode,
+    sectionCode: section.sectionId,
+    type: section.type,
+    status: section.status === undefined ? 'ACTIVE' : section.status,
+    times: Array.isArray(section.meetings)
+      ? section.meetings.map((m) => (m && typeof m === 'object' ? { day: toYehiaDay(m.day), start: m.startTime, end: m.endTime, room: 'R-1' } : m))
+      : section.meetings
+  };
+  return out;
+}
+
+function toYehiaTimetable(timetable) {
+  if (!timetable || typeof timetable !== 'object' || Array.isArray(timetable)) return timetable;
+  const out = { ...timetable };
+  if (Array.isArray(timetable.sections)) {
+    out.sections = timetable.sections.map(toYehiaSection);
+    out.sectionIds = timetable.sections.map((s) => (s && s.sectionId) || null);
+  }
+  if (out.missingSectionIds === undefined) out.missingSectionIds = [];
+  if (out.archivedSectionIds === undefined) out.archivedSectionIds = [];
+  return out;
+}
+
 function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), {
     status,
@@ -96,13 +133,13 @@ function createFakeTimetableFetch({ mode = 'normal', delayMs = 0, transform } = 
       return jsonResponse(404, { error: { code: 'NOT_FOUND' } });
     }
     if (mode === 'wrongId') {
-      return jsonResponse(200, { ...timetable, id: 'tt-something-else' });
+      return jsonResponse(200, toYehiaTimetable({ ...timetable, id: 'tt-something-else' }));
     }
     if (mode !== 'ignoresOwnership' && timetable.ownerId !== user.sub) {
       return jsonResponse(403, { error: { code: 'FORBIDDEN' } });
     }
     const body = transform ? transform(structuredClone(timetable)) : timetable;
-    return jsonResponse(200, body);
+    return jsonResponse(200, toYehiaTimetable(body));
   }
 
   return {

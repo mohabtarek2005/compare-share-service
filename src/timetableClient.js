@@ -1,12 +1,12 @@
 const {
   timetableUrl,
-  extractTimetable,
+  normalizeTimetable,
   TIMETABLE_SERVICE_TIMEOUT_MS
 } = require('./integrationAssumptions');
 
 // Small client for Yehia's Timetable Service.
 // getTimetable() never throws. It returns one of:
-//   { ok: true, timetable }
+//   { ok: true, timetable }   timetable in the internal shape (see normalizeTimetable)
 //   { ok: false, reason: 'NOT_FOUND' | 'UNAUTHORIZED' | 'UNAVAILABLE' | 'BAD_RESPONSE' }
 // fetchFn can be replaced in tests so no real network calls are made.
 function createTimetableClient({ baseUrl, fetchFn = fetch, timeoutMs = TIMETABLE_SERVICE_TIMEOUT_MS }) {
@@ -49,12 +49,12 @@ function createTimetableClient({ baseUrl, fetchFn = fetch, timeoutMs = TIMETABLE
       return { ok: false, reason: 'BAD_RESPONSE' };
     }
 
-    const timetable = extractTimetable(body);
-    // The service must send back the timetable we asked for.
-    if (!timetable || timetable.id !== timetableId) {
+    const result = normalizeTimetable(body);
+    // The service must send back the timetable we asked for, in the agreed shape.
+    if (!result.ok || result.timetable.id !== timetableId) {
       return { ok: false, reason: 'BAD_RESPONSE' };
     }
-    return { ok: true, timetable };
+    return { ok: true, timetable: result.timetable };
   }
 
   return { getTimetable };
