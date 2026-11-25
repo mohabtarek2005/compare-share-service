@@ -43,7 +43,7 @@ always uses Floci's dummy `test` credentials, and stops unless the account is
 | `SHARE_TABLE_NAME` | `share_links` | DynamoDB table |
 | `DYNAMODB_ENDPOINT` | `http://floci:4566` | Floci by its Docker name (inside Lambda, `localhost` is the container) |
 | `CATALOGUE_JWKS_URL` | `http://host.docker.internal:3000/.well-known/jwks.json` | Mohamed's public keys on the PC |
-| `TIMETABLE_SERVICE_URL` | `http://host.docker.internal:3002` | Yehia's service (not confirmed yet) |
+| `TIMETABLE_SERVICE_URL` | `http://host.docker.internal:3002` | Yehia's Timetable Service (confirmed contract, see below) |
 | `TERM_START_DATE`, `TERM_END_DATE`, `TIMEZONE` | `2026-09-13`, `2026-12-31`, `Africa/Cairo` | calendar export |
 
 `AWS_REGION` is set by the Lambda runtime itself. No Function URL is created.
@@ -143,6 +143,70 @@ aws $E cloudwatch get-metric-statistics --namespace ClassTT/CompareShare --metri
 aws $E cloudwatch describe-alarms --alarm-name-prefix class-tt-compare-share --query 'MetricAlarms[].[AlarmName,StateValue]' < /dev/null
 aws $E cloudwatch describe-alarm-history --alarm-name class-tt-compare-share-5xx --history-item-type StateUpdate < /dev/null
 ```
+
+## Timetable Service integration (Yehia)
+
+**Confirmed contract.** Verified live against Yehia's Timetable Service
+(`DEP_MODE=live`, commits `01c6397`/`26b11b5`) using Mohamed's real Catalogue and
+logins. `GET /api/timetables/{id}` returns:
+
+```json
+{ "id": "…", "ownerId": "<token sub>", "name": "…", "createdAt": "…", "sectionIds": ["…"],
+  "sections": [ { "id": "…", "courseId": "…", "courseCode": "TST401", "courseTitle": "…",
+                  "sectionCode": "L2", "type": "lecture", "status": "ACTIVE",
+                  "times": [ { "day": "Sun", "start": "12:00", "end": "13:00", "room": "T-105" },
+                             { "day": "Tue", "start": "09:00", "end": "10:00", "room": "T-105" } ] } ],
+  "missingSectionIds": [], "archivedSectionIds": [], "stale": false }
+```
+
+`GET /api/timetables` lists the caller's timetables
+(`[{ id, ownerId, name, createdAt, sectionIds, stale }]`); the frontend uses it
+for the timetable picker (`appConfig.timetableListPath`).
+
+**Adapter** (`normalizeTimetable` in `src/integrationAssumptions.js`):
+
+| Yehia | Compare & Share |
+|---|---|
+| `section.id` | `sectionId` |
+| `section.courseCode` | `courseCode` |
+| `section.type` | `type` (missing → 502; never inferred) |
+| `section.times[]` | `meetings[]` (every meeting kept) |
+| `day` `Sun`…`Sat` (any case) | `SUN`…`SAT`; any other value → 502 |
+| `start` / `end` | `startTime` / `endTime` (HH:MM checked by the comparison) |
+| `stale`, `missingSectionIds`, `archivedSectionIds`, `status !== "ACTIVE"` | outdated → **409** `STALE_TIMETABLE` |
+| `ownerId` | must equal the token's `sub` (missing → 502, other owner → 404) |
+| anything else malformed or unexpected | **502** `TIMETABLE_SERVICE_BAD_RESPONSE` |
+
+**Teaching week:** all seven days (team decision of 25 Nov 2026, matching
+Mohamed's `dayOfWeek` 0–6 and Yehia's 7-day support in `26b11b5`). Free days are
+counted over Sunday–Saturday, and Friday/Saturday classes are compared, shared
+and exported to `.ics` like any other day.
+
+**Configuration.** The Lambda reaches Yehia with
+`TIMETABLE_SERVICE_URL=http://host.docker.internal:3002` (his service on the PC,
+started with `DEP_MODE=live`, `CATALOGUE_URL=http://127.0.0.1:3000`,
+`JWT_ISSUER=class-tt`, `JWT_AUDIENCE=class-tt` and Floci for DynamoDB). The local
+"deployed" preview proxy sends `GET /api/timetables` to Yehia and the Compare &
+Share API to API Gateway, on one origin with Mohamed's login.
+
+**End-to-end results (25 Nov 2026, real services only):** 30/30 checks — login,
+Catalogue, generate and save in Yehia's service, saved-timetable list, compare of
+4 real timetables (one with a Friday class) with all four metrics and rankings
+equal to hand calculations, share via API Gateway + Lambda, view by another user
+(5 meetings, types kept), ICS with the right weekdays/times and weekly
+recurrence (including a Friday event), owner revoke, 404 for another user's
+compare/share/revoke, 401 without a token, 409 for a timetable whose section was
+archived, normalized snapshot in DynamoDB, one CloudWatch line per request with
+no sensitive values (metrics equal the log lines). Browser check on the deployed
+preview: real list, compare and share all worked.
+
+**Known limitations (other teams):**
+- Yehia's README still describes a Sunday–Thursday grid; his code supports 7 days.
+- Yehia defaults a missing section `type` to `"lecture"` (Mohamed always sends one).
+- Yehia's JWKS cooldown (30 s) only starts after a successful key download, so
+  repeated failures still call the Catalogue each time; clock tolerance is 60 s.
+- Missing sections cannot be produced with the real Catalogue (sections are
+  archived, never deleted), so "missing" was only tested with fixtures.
 
 ## Floci 2.5.0 limitations (checked)
 

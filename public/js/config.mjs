@@ -6,12 +6,11 @@ export const appConfig = {
   // same origin as these files).
   apiBaseUrl: '',
 
-  // UNCONFIRMED: path of Yehia's "list my saved timetables" endpoint, reached
-  // through the same origin (for example via API Gateway). It is null until
-  // the contract is agreed; the pages then let the student type timetable ids.
-  // Expected response when set: [{ "id": "tt-1", "name": "Option A" }, ...]
-  // or { "timetables": [ ...same items... ] }.
-  timetableListPath: null,
+  // CONFIRMED (Yehia commit 01c6397): GET /api/timetables lists the signed-in
+  // student's saved timetables as [{ id, ownerId, name, createdAt, sectionIds, stale }].
+  // It must be reachable on the same origin as these pages (shared gateway or
+  // the local preview proxy); the request carries the same in-memory token.
+  timetableListPath: '/api/timetables',
 
   // Sign-in uses Mohamed's Catalogue & Accounts service (CONFIRMED contract,
   // mohamed/docs/api-contract.md v1.8 and mohamed/frontend/assets/api.js):

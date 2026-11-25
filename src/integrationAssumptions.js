@@ -1,34 +1,124 @@
-// INTEGRATION ASSUMPTIONS FOR THE COMPARE & SHARE API
+// INTEGRATION CONTRACTS FOR THE COMPARE & SHARE API
 //
-// Item 4 (login tokens) is now CONFIRMED from Mohamed's code. Everything about
-// Yehia's Timetable Service (items 1-3) is still UNCONFIRMED; it lets the API be
-// built and tested before that integration. Change this file when the real
-// contracts are agreed.
+// Both are CONFIRMED from the real services:
+//   items 1-3: Yehia's Timetable Service, commit 01c6397 (main 2fe5f2b), tested
+//              live in DEP_MODE=live against Mohamed's Catalogue;
+//   item 4:    Mohamed's login tokens.
 
-// 1. Yehia's endpoint for one saved timetable. Assumed:
+// 1. One saved timetable:
 //    GET {TIMETABLE_SERVICE_URL}/api/timetables/{id}
 //    with the student's own token in "Authorization: Bearer <token>".
-//    The Timetable Service is assumed to check ownership and to answer
-//    404 (or 403) when the timetable is not the caller's.
+//    Yehia stores timetables under the token's "sub" and answers 404 when the
+//    timetable is not the caller's.
 function timetableUrl(baseUrl, timetableId) {
   return `${baseUrl.replace(/\/+$/, '')}/api/timetables/${encodeURIComponent(timetableId)}`;
 }
 
-// 2. Assumed 200 response body: the timetable object itself, in the shape
-//    described in compareAssumptions.js. Return null if the body is not usable.
-function extractTimetable(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+// 2. CONFIRMED 200 response body (Yehia 01c6397):
+//    {
+//      id, ownerId, name, createdAt, sectionIds,
+//      sections: [{
+//        id, courseId, courseCode, courseTitle, sectionCode,
+//        type,                         // "lecture" | "lab" | "tutorial" (from the Catalogue)
+//        status,                       // "ACTIVE" | "ARCHIVED"
+//        times: [{ day: "Sun", start: "09:00", end: "10:30", room }]   // every meeting
+//      }],
+//      missingSectionIds: [], archivedSectionIds: [], stale: false
+//    }
+//
+//    normalizeTimetable() turns it into the internal shape used by the
+//    comparison, sharing and calendar code (see compareAssumptions.js):
+//      section.id         -> sectionId
+//      section.courseCode -> courseCode
+//      section.type       -> type        (never inferred when missing)
+//      section.times[]    -> meetings[]  (every meeting kept)
+//      time.day  Sun..Sat -> SUN..SAT    (all seven days, case-insensitive;
+//                                         any other value is invalid -> 502)
+//      time.start/end     -> startTime/endTime
+//    A timetable is marked stale (409 later) when Yehia says stale, or lists
+//    missing or archived sections, or any section is not ACTIVE.
+//
+//    Result:
+//      { ok: false }            malformed or unexpected -> 502
+//      { ok: true, timetable }
+const DAY_NAMES = { sun: 'SUN', mon: 'MON', tue: 'TUE', wed: 'WED', thu: 'THU', fri: 'FRI', sat: 'SAT' };
+const ACTIVE_STATUS = 'ACTIVE';
+
+const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const isText = (value) => typeof value === 'string' && value.trim() !== '';
+const isTextList = (value) => Array.isArray(value) && value.every(isText);
+
+function normalizeMeeting(time) {
+  if (!isObject(time) || typeof time.day !== 'string' || typeof time.start !== 'string' || typeof time.end !== 'string') {
     return null;
   }
-  return body;
+  const day = DAY_NAMES[time.day.trim().toLowerCase()];
+  if (!day) {
+    return null;
+  }
+  // Time format is checked later by the comparison code (HH:MM).
+  return { day, startTime: time.start, endTime: time.end };
 }
 
-// 3. PROVISIONAL owner field on a saved timetable. Every timetable must include
-//    it as a non-empty string equal to the logged-in user's "sub". If it is
-//    missing or malformed the response is treated as invalid (502), and if it
-//    belongs to someone else the timetable is reported as not found (404).
-//    If Yehia's service uses a different ownership model, change this rule
-//    with him; do not remove the check.
+function normalizeSection(section) {
+  if (!isObject(section) || !isText(section.id) || !isText(section.courseCode) || !isText(section.type)) {
+    return null;
+  }
+  if (section.status !== undefined && typeof section.status !== 'string') {
+    return null;
+  }
+  if (!Array.isArray(section.times) || section.times.length === 0) {
+    return null;
+  }
+  const meetings = [];
+  for (const time of section.times) {
+    const meeting = normalizeMeeting(time);
+    if (!meeting) {
+      return null; // one bad meeting makes the whole response unusable; nothing is dropped
+    }
+    meetings.push(meeting);
+  }
+  return {
+    normalized: { sectionId: section.id, courseCode: section.courseCode, type: section.type, meetings },
+    inactive: section.status !== undefined && section.status.trim().toUpperCase() !== ACTIVE_STATUS
+  };
+}
+
+function normalizeTimetable(body) {
+  if (!isObject(body) || !Array.isArray(body.sections)) {
+    return { ok: false };
+  }
+  if (body.stale !== undefined && typeof body.stale !== 'boolean') return { ok: false };
+  if (body.missingSectionIds !== undefined && !isTextList(body.missingSectionIds)) return { ok: false };
+  if (body.archivedSectionIds !== undefined && !isTextList(body.archivedSectionIds)) return { ok: false };
+
+  const sections = [];
+  let anyInactive = false;
+  for (const section of body.sections) {
+    const result = normalizeSection(section);
+    if (!result) {
+      return { ok: false };
+    }
+    anyInactive = anyInactive || result.inactive;
+    sections.push(result.normalized);
+  }
+
+  const archived = Array.isArray(body.archivedSectionIds) && body.archivedSectionIds.length > 0;
+  const timetable = {
+    id: body.id,
+    name: body.name,
+    [OWNER_FIELD]: body[OWNER_FIELD],
+    stale: body.stale === true || archived || anyInactive,
+    missingSectionIds: body.missingSectionIds,
+    sections
+  };
+  return { ok: true, timetable };
+}
+
+// 3. Owner field. Every timetable must include it as a non-empty string equal
+//    to the logged-in user's "sub" (Yehia returns the stored owner, which is
+//    the token's sub). Missing or malformed -> 502; another owner -> 404.
+//    This check stays even though Yehia also scopes by owner.
 const OWNER_FIELD = 'ownerId';
 
 // 4. CONFIRMED login token contract (read from Mohamed's source code at commit
@@ -78,7 +168,7 @@ const TIMETABLE_SERVICE_TIMEOUT_MS = 5000;
 
 module.exports = {
   timetableUrl,
-  extractTimetable,
+  normalizeTimetable,
   OWNER_FIELD,
   TIMETABLE_SERVICE_TIMEOUT_MS,
   JWT_ALGORITHM,

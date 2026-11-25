@@ -71,7 +71,7 @@ describe('POST /api/compare - successful comparisons', () => {
     assert.deepEqual(res.body.results[0], {
       timetableId: 'tt-b',
       name: 'Option B',
-      metrics: { freeDays: 3, totalGapMinutes: 0, earliestStart: '09:00', latestEnd: '13:30' },
+      metrics: { freeDays: 5, totalGapMinutes: 0, earliestStart: '09:00', latestEnd: '13:30' },
       rank: 1
     });
     assert.equal(res.headers.get('x-powered-by'), null);
@@ -420,7 +420,9 @@ describe('Compare API - review fixes', () => {
     const malformed = [
       (timetable) => (timetable.sections = []),
       (timetable) => delete timetable.sections,
-      (timetable) => (timetable.sections[0].meetings[0].day = 'FRI'),
+      (timetable) => (timetable.sections[0].meetings[0].day = 'XYZ'),
+      (timetable) => delete timetable.sections[0].meetings,
+      (timetable) => delete timetable.sections[0].type,
       (timetable) => (timetable.sections[0].meetings[0].startTime = '9am'),
       (timetable) => (timetable.sections[1].meetings[0].startTime = '10:00'), // overlap
       (timetable) => (timetable.stale = 'yes'),
@@ -436,6 +438,28 @@ describe('Compare API - review fixes', () => {
       // No raw upstream data such as section ids is sent back.
       assert.doesNotMatch(res.text, /CS101|MATH201|tt-b/);
     }
+  });
+
+  test('Friday and Saturday classes are accepted and counted in the seven-day week', async (t) => {
+    for (const day of ['FRI', 'SAT']) {
+      const { baseUrl } = await startApi(t, { fakeService: changeTimetableB((timetable) => (timetable.sections[0].meetings[0].day = day)) });
+      const res = await postCompare(baseUrl, { timetableIds: ['tt-a', 'tt-b'], criterion: 'mostFreeDays' });
+      assert.equal(res.status, 200, `${day} should be accepted`);
+      const b = res.body.results.find((r) => r.timetableId === 'tt-b');
+      assert.ok(b.metrics.freeDays >= 0 && b.metrics.freeDays <= 7);
+    }
+  });
+
+  test('a timetable with an archived section is outdated (409)', async (t) => {
+    const archivedList = changeTimetableB((timetable) => (timetable.archivedSectionIds = [timetable.sections[0].sectionId]));
+    const first = await startApi(t, { fakeService: archivedList });
+    const res1 = await postCompare(first.baseUrl, { timetableIds: ['tt-a', 'tt-b'], criterion: 'leastGaps' });
+    assert.equal(res1.status, 409);
+    assert.equal(res1.body.error.code, 'STALE_TIMETABLE');
+    const archivedStatus = changeTimetableB((timetable) => (timetable.sections[0].status = 'ARCHIVED'));
+    const second = await startApi(t, { fakeService: archivedStatus });
+    const res2 = await postCompare(second.baseUrl, { timetableIds: ['tt-a', 'tt-b'], criterion: 'leastGaps' });
+    assert.equal(res2.status, 409);
   });
 
   test('a stale timetable is still 409, and its details hold only the code and id', async (t) => {

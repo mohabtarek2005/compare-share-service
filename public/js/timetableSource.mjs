@@ -1,6 +1,6 @@
 // The ONLY place that knows how to list the student's saved timetables.
-// Yehia's list endpoint is not agreed yet (see config.mjs), so this returns
-// { ok: false, code: 'NOT_CONFIGURED' } until a path is set. Pages then let the
+// It calls Yehia's GET /api/timetables (path set in config.mjs). If no path is
+// configured it returns { ok: false, code: 'NOT_CONFIGURED' } and pages let the
 // student type timetable ids instead. No sample data is ever returned.
 
 export function createTimetableSource({ api, listPath }) {

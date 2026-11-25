@@ -5,9 +5,12 @@
 // exists. Check each one with Yehia (Timetable) and Mohamed (Catalogue) and
 // update this file only, so the rest of the code does not need to change.
 
-// 1. Teaching days. Assumed Sunday to Thursday (Egyptian university week).
-//    Day values must match these strings exactly.
-const TEACHING_DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU'];
+// 1. CONFIRMED teaching days: all seven days (team decision, 25 Nov 2026).
+//    Mohamed's Catalogue allows dayOfWeek 0-6 and Yehia's Timetable Service
+//    supports a 7-day week since commit 26b11b5, so Friday and Saturday classes
+//    are accepted and free days are counted over the seven-day week.
+//    Day values must match these strings exactly; anything else is invalid.
+const TEACHING_DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
 // 2. Time format. Assumed 24-hour "HH:MM" strings, e.g. "09:00" or "14:30".
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
